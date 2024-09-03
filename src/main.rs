@@ -32,7 +32,7 @@ impl Lattice {
     // hopping probability (v_ij) for jumping from one site to another
     fn charge_hopping_rate(&self, x1: usize, y1: usize, z1: usize, x2: usize, y2: usize, z2: usize) -> f64 {
         let a: f64 = 0.6e-9;                // distance between sites       //** since uniform can be made obsolete?
-        let v_0: f64 = 1e-12;               // base hopping attemp rate
+        let v_0: f64 = 1e12;               // base hopping attemp rate
         let gamma: f64 = 10.0/(2.0 * a);    // satisfy 2*gamma*a = 10
         const K_B: f64 = 1.380649e-23; // J/K Boltzmann constant
         const T: f64 = 295.0; //kelvin
@@ -123,7 +123,7 @@ impl Lattice {
         let time_increment = -random_time_index.ln() / vtot;
 
         let a: f64 = 0.6e-9;                // distance between sites       //** since uniform can be made obsolete?
-        let v_0: f64 = 1e-12;               // base hopping attemp rate
+        let v_0: f64 = 1e12;               // base hopping attemp rate
         let gamma: f64 = 10.0/(2.0 * a);    // satisfy 2*gamma*a = 10
 
         let t_0 = 1.0/(6.0 * v_0 * (-2.0 * gamma * a).exp());
@@ -147,7 +147,7 @@ impl Lattice {
 
 fn main() {
     // Declare the lattice
-    let lattice = Lattice::new(50);
+    let lattice = Lattice::new(60);
 
     // **? what determines starting point
 
