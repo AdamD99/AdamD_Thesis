@@ -72,17 +72,12 @@ impl Lattice {
         let mut site_prob: Vec<f64> = vec![];
         let mut event_probabilities: Vec<f64> = vec![];
 
-        println!("{:?}", current_site);
         for x in (x0.saturating_sub(grid_size))..=x0+grid_size {
-            println!("{}", x);
-            // for y in y0-grid_size..=y0+grid_size {
             for y in (y0.saturating_sub(grid_size))..=y0+grid_size {
-                println!("{}", y);
                 for z in (z0.saturating_sub(grid_size))..=z0+grid_size {
-                    println!("{}", z);
                     // Skip the current site location and sites out of lattice boundary
                     if (x == x0 && y == y0 && z == z0) || !self.is_valid_site(x as usize,y as usize,z as usize) {
-                        println!("Skipped site x:{} y:{} z:{} site does not exist, or is current location", x,y,z);
+                        // println!("Skipped site x:{} y:{} z:{} site does not exist, or is current location", x,y,z);
                         continue;
                     }
 
@@ -140,14 +135,14 @@ fn main() {
     let lattice = Lattice::new(60, T);
 
     // **? what determines starting point - random selection
-    // let log_vector = simulate_hops(lattice,(20,20,20), 10, 100.0);
+    let log_vector = simulate_hops(lattice,(20,20,20), 1000, 1000000.0);
 
     // println!("{:?}",lattice.simulate_hop((x0,y0,z0), 3));
-    lattice.simulate_hop((0,0,0), 3);
+    // lattice.simulate_hop((0,0,0), 3);
     // lattice.simulate_hop((30,30,30), 3);
 
     //Export the logged data
-    // export_data(log_vector)
+    export_data(log_vector)
 }
 
 fn simulate_hops(lattice: Lattice, random_site: (u8, u8, u8), snapshot_freq: usize, runtime: f64) -> Vec<(f64, f64)> {
@@ -160,7 +155,7 @@ fn simulate_hops(lattice: Lattice, random_site: (u8, u8, u8), snapshot_freq: usi
     let (mut x0, mut y0, mut z0) = random_site;
 
     while t0_elapsed_total < runtime {
-        println!("MAIN: Simulating Hop: {:?}", (x0,y0,z0));
+        // println!("MAIN: Simulating Hop: {:?}", (x0,y0,z0));
         let (new_site, t0_elapsed_inc, x_displacement_inc) = lattice.simulate_hop((x0,y0,z0), 3);
 
         (x0, y0, z0) = new_site;
@@ -172,6 +167,10 @@ fn simulate_hops(lattice: Lattice, random_site: (u8, u8, u8), snapshot_freq: usi
         // Store every Nth snapshot in the vector
         if iteration_counter % snapshot_freq == 0 {
             log_vector.push((t0_elapsed_total, x_displacement_total));
+        }
+
+        if iteration_counter % snapshot_freq*1000 == 0 {
+            println!("{:.2}% Complete", (t0_elapsed_total as f64/runtime)*100.0);
         }
 
 
