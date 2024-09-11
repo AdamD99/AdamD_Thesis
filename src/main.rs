@@ -153,6 +153,9 @@ fn simulate_hops(lattice: Lattice, random_site: (u8, u8, u8), snapshot_freq: usi
     let mut x_displacement_total = 0.0;
     let mut log_vector: Vec<(f64, f64)> = Vec::new(); // Vector to store time and displacement
     let mut iteration_counter = 0;
+    let mut timer = std::time::Instant::now();
+    let mut percent_complete_reported = 5.0;
+    let mut iterations_at_last_report = 0;
 
     let (mut x0, mut y0, mut z0) = random_site;
 
@@ -169,10 +172,16 @@ fn simulate_hops(lattice: Lattice, random_site: (u8, u8, u8), snapshot_freq: usi
         // Store every Nth snapshot in the vector
         if iteration_counter % snapshot_freq == 0 {
             log_vector.push((t0_elapsed_total, x_displacement_total));
-        }
 
-        if iteration_counter % snapshot_freq*1000 == 0 {
-            println!("{:.2}% Complete", (t0_elapsed_total as f64/runtime)*100.0);
+            let percent_complete = (t0_elapsed_total/runtime)*100.0;
+            if percent_complete >= percent_complete_reported {
+                let elapsed_time = timer.elapsed().as_secs_f64();
+                let iterations = iteration_counter - iterations_at_last_report;
+                println!("{:.0}% complete, simulation speed = {:.0} iter/sec", percent_complete, iterations as f64/elapsed_time);
+                timer = std::time::Instant::now();
+                percent_complete_reported += 5.0;
+                iterations_at_last_report = iteration_counter;
+            }
         }
 
 
