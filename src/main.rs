@@ -5,6 +5,7 @@ use rand::Rng;
 use rand_distr::{Normal, Distribution};
 use std::fs::File;
 use csv::Writer;
+use chrono::Local;
 
 const A: f64 = 0.8935e-9;                  // distance between sites (m)
 const V_0: f64 = 1e12;                  // base hopping attemp rate (eV)
@@ -14,6 +15,7 @@ const V_0: f64 = 1e12;                  // base hopping attemp rate (eV)
 const GAMMA: f64 = 1.0/(5.596e-9);
 const K_B: f64 = 8.617333262e-5;        // Boltzmann constant (eV/K)
 const T: f64 = 295.0;                   // Temperature (kelvin)
+const FIELD: f64 = 1.0/100e-9;            // volts/m, 1V over 100nm material
 
 struct Lattice {
     size: usize,
@@ -39,11 +41,11 @@ impl Lattice {
     }
 
     // hopping probability (v_ij) for jumping from one site to another
-    fn charge_hopping_rate(&self, x1: usize, y1: usize, z1: usize, x2: usize, y2: usize, z2: usize) -> f64 {
-        let target_site_distance: f64 = self.euclidean_distance(x1, y1, z1, x2, y2, z2);
+    fn charge_hopping_rate(&self, (x1,y1,z1): (usize,usize,usize), (x2,y2,z2): (usize,usize,usize), target_site_distance: f64, delta_v: f64) -> f64 {
 
         // find difference in energy between the two sites
-        let delta_e = self.site_energy[x2][y2][z2] - self.site_energy[x1][y1][z1];
+        let delta_e = self.site_energy[x2][y2][z2] - self.site_energy[x1][y1][z1] + delta_v;
+
         // let delta_e = -1.0;
         let energy_factor = if delta_e > 0.0 {
             f64::exp((-delta_e)/(K_B*self.temp))
@@ -53,40 +55,40 @@ impl Lattice {
         
         V_0 * (-2.0 * GAMMA * target_site_distance).exp() * energy_factor
     }
-    
-    // Euclidean distance between two sites
-    fn euclidean_distance(&self, x_cur: usize, y_cur: usize, z_cur: usize, x_tgt: usize, y_tgt: usize, z_tgt: usize) -> f64 {
-
-        let dx: f64 = x_tgt as f64 - x_cur as f64;
-        let dy: f64 = y_tgt as f64 - y_cur as f64;
-        let dz: f64 = z_tgt as f64 - z_cur as f64;
-        
-        A * (dx * dx + dy * dy + dz * dz).sqrt()    // euclidean distance factor
-    }
 
     // calculate hopping probabilites for all possible sites
-    fn simulate_hop(&self, current_site: (u8, u8, u8), grid_size: u8) -> ((u8, u8, u8), f64, f64) {
+    fn simulate_hop(&self, current_site: (u8, u8, u8), grid_size: i8) -> ((u8, u8, u8), f64, f64) {
         let (x0, y0, z0) = current_site;
 
         let mut site_coord: Vec<(u8, u8, u8)> = vec![];
         let mut site_prob: Vec<f64> = vec![];
         let mut event_probabilities: Vec<f64> = vec![];
 
-        for x in (x0.saturating_sub(grid_size))..=x0+grid_size {
-            for y in (y0.saturating_sub(grid_size))..=y0+grid_size {
-                for z in (z0.saturating_sub(grid_size))..=z0+grid_size {
+        for x in -grid_size..=grid_size {
+            let new_x: u8 = (x0 as i8 + x).rem_euclid(self.size as i8) as u8;
+            for y in -grid_size..=grid_size {
+                let new_y: u8 = (y0 as i8 + y).rem_euclid(self.size as i8) as u8;
+                for z in -grid_size..=grid_size {
+                    let new_z: u8 = (z0 as i8 + z).rem_euclid(self.size as i8) as u8;
+
                     // Skip the current site location and sites out of lattice boundary
-                    if (x == x0 && y == y0 && z == z0) || !self.is_valid_site(x as usize,y as usize,z as usize) {
-                        // println!("Skipped site x:{} y:{} z:{} site does not exist, or is current location", x,y,z);
+                    if ( new_x == x0 && new_y == y0 && new_z == z0 ) || !self.is_valid_site(new_x as usize,new_y as usize,new_z as usize) {
+                        // println!("Skipped site x:{} y:{} z:{} site does not exist, or is current location", new_x,new_y,new_z);
                         continue;
                     }
 
-                    let prob = self.charge_hopping_rate(x0.into(), y0.into(), z0.into(), x.into(), y.into(), z.into());
+                    // euclidian distance to target site
+                    let target_site_distance: f64 = A * ((x * x + y * y + z * z) as f64).sqrt();
+        
+                    // voltage difference between sites
+                    let delta_v = FIELD * x as f64;   // volts
 
-                    site_coord.push((x,y,z));
+                    let prob = self.charge_hopping_rate((x0.into(),y0.into(),z0.into()), (new_x.into(),new_y.into(),new_z.into()), target_site_distance, delta_v);
+                    // let prob = self.charge_hopping_rate(x0.into(), y0.into(), z0.into(), new_x.into(), new_y.into(), new_z.into());
+
+                    site_coord.push((new_x,new_y,new_z));
                     site_prob.push(prob);
-
-                }            
+                }
             }
         }
 
@@ -103,9 +105,6 @@ impl Lattice {
         let mut event_selector = rand::thread_rng();                                 // declare random number generator
         let random_site_index: f64 = event_selector.gen_range(0.0..=1.0) + f64::EPSILON;        // randomise an index of event to execute
 
-        // ^^ *? Epsilon the best way to not allow 0? would also mean site_index could go beyond 1
-        //       however it does get caught by the "i < event_probabilities.len()" in while loop providing the same outcome as if i > 1 is floored
-
         //execute hopping event for randomly selected site
         let mut current_probability_total = event_probabilities[0]; // initialise total to first entry in event probs
         let mut i = 0;
@@ -120,9 +119,11 @@ impl Lattice {
         let random_time_index: f64 = event_selector.gen_range(0.0..=1.0) + f64::EPSILON; 
         let time_elapsed = -random_time_index.ln() / vtot;  // seconds
 
-        let t_0 = 1.0/(6.0 * V_0 * (-2.0 * GAMMA * A).exp());
+        // rust cannot declare as global since exp() is a runtime variable and it cannot handle it.
+        let t_0: f64 = 1.0/(6.0 * V_0 * (-2.0 * GAMMA * A).exp());
 
         let time_increment = time_elapsed/t_0;                // normalised to periods of t_0
+        // println!("new site: {:?}, new sitex: {}, x0: {}, A: {}", new_site, new_site.0, x0, A);
         let x_displacement = (new_site.0 as f64 - x0 as f64) * A;
 
         return (new_site, time_increment, x_displacement)            // return new site, elapsed time, and displacement in the x vector
@@ -134,12 +135,11 @@ fn main() {
     // declare lattice of size and temp
     let lattice = Lattice::new(60, T);
 
-    // **? what determines starting point - random selection
-    let log_vector = simulate_hops(lattice,(20,20,20), 1000, 1000000.0);
+    // !! TODO: random selection algorithm for starting site
 
-    // println!("{:?}",lattice.simulate_hop((x0,y0,z0), 3));
+    let log_vector = simulate_hops(lattice,(20,20,20), 1000, 100000.0);
+
     // lattice.simulate_hop((0,0,0), 3);
-    // lattice.simulate_hop((30,30,30), 3);
 
     //Export the logged data
     export_data(log_vector)
@@ -159,7 +159,7 @@ fn simulate_hops(lattice: Lattice, random_site: (u8, u8, u8), snapshot_freq: usi
         let (new_site, t0_elapsed_inc, x_displacement_inc) = lattice.simulate_hop((x0,y0,z0), 3);
 
         (x0, y0, z0) = new_site;
-        t0_elapsed_total += t0_elapsed_inc.log10();
+        t0_elapsed_total += t0_elapsed_inc;
         x_displacement_total += x_displacement_inc;
 
         iteration_counter += 1;
@@ -179,7 +179,7 @@ fn simulate_hops(lattice: Lattice, random_site: (u8, u8, u8), snapshot_freq: usi
 
     }
 
-    return log_vector
+    log_vector
 }
 
 // Generates Guassian/Normal Distribution of starting energy levels for each site
@@ -204,11 +204,15 @@ fn generate_energy_levels(size: usize) -> Vec<Vec<Vec<f64>>> {
 
 // Write Lattice data to a CSV file
 fn export_data(log_vector: Vec<(f64, f64)>) {
+    let date = Local::now();
+    let formatted_date = date.format("%d-%m-%Y-%H;%M;%S").to_string();
+    let file_name = format!("log_data-{}.csv", formatted_date);
+
     //write data to csv
-    let file = File::create("log_data.csv").expect("Unable to create file");
+    let file = File::create(&file_name).expect("Unable to create file");
     let mut wtr = Writer::from_writer(file);
     
-    // Write headers (optional)
+    // Write headers
     // wtr.write_record(&["Time", "Distance"]).expect("Unable to write record");
 
     for (time, distance) in log_vector.iter() {
