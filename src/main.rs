@@ -124,7 +124,9 @@ impl Lattice {
 
         let time_increment = time_elapsed/t_0;                // normalised to periods of t_0
         // println!("new site: {:?}, new sitex: {}, x0: {}, A: {}", new_site, new_site.0, x0, A);
-        let x_displacement = (new_site.0 as f64 - x0 as f64) * A;
+        let x_difference = new_site.0 as f64 - x0 as f64;
+        let x_difference_correction = (x_difference + 30.0) % 60.0 - 30.0;
+        let x_displacement = x_difference_correction * A;
 
         return (new_site, time_increment, x_displacement)            // return new site, elapsed time, and displacement in the x vector
     }
