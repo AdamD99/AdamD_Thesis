@@ -59,10 +59,10 @@ impl Lattice {
     // calculate hopping probabilites for all possible sites
     fn simulate_hop(&self, current_site: (u8, u8, u8), grid_size: i8) -> ((u8, u8, u8), f64, f64) {
         let (x0, y0, z0) = current_site;
-
-        let mut site_coord: Vec<(u8, u8, u8)> = vec![];
-        let mut site_prob: Vec<f64> = vec![];
-        let mut event_probabilities: Vec<f64> = vec![];
+        
+        let number_of_neighbours = (2 * grid_size as usize + 1).pow(3) - 1; // exclude the current site
+        let mut site_coord: Vec<(u8, u8, u8)> = Vec::with_capacity(number_of_neighbours);
+        let mut site_prob: Vec<f64> = Vec::with_capacity(number_of_neighbours);
 
         for x in -grid_size..=grid_size {
             let new_x: u8 = (x0 as i8 + x).rem_euclid(self.size as i8) as u8;
@@ -96,10 +96,9 @@ impl Lattice {
         let vtot: f64 = site_prob.iter().sum();
 
         //get normalised hop probabilities
-        for &prob in site_prob.iter() {
-            let event_prob = prob / vtot;
-            event_probabilities.push(event_prob);
-        }
+        let event_probabilities = site_prob.iter()
+            .map(|prob| prob / vtot)
+            .collect::<Vec<_>>(); // normalise probabilities
         
         //random event selection
         let mut event_selector = rand::thread_rng();                                 // declare random number generator
@@ -153,6 +152,8 @@ fn simulate_hops(lattice: Lattice, random_site: (u8, u8, u8), snapshot_freq: usi
     let mut x_displacement_total = 0.0;
     let mut log_vector: Vec<(f64, f64)> = Vec::new(); // Vector to store time and displacement
     let mut iteration_counter = 0;
+
+    // For reporting simulation speed
     let mut timer = std::time::Instant::now();
     let mut percent_complete_reported = 5.0;
     let mut iterations_at_last_report = 0;
