@@ -1,7 +1,5 @@
-target/debug/
-target/.rustc_info.json
-target/CACHEDIR.TAG
-.vscode/launch.json
+target/
+.vscode/
 main_old.rs
-log_data.csv
-src/scratchpad.rs
+data/
+old data/
