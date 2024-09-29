@@ -3,16 +3,17 @@ extern crate csv;
 
 use rand::Rng;
 use rand_distr::{Normal, Distribution};
+use core::time;
 use std::fs;
 use csv::Writer;
 use chrono::Local;
 
 const A: f64 = 0.8935e-9;                  // distance between sites (m)
-const V_0: f64 = 1e12;                  // base hopping attemp rate (eV)
+const V_0: f64 = 1.0e12;                  // base hopping attemp rate (eV)
 
 //**!? in papers stated as the "inverse localization radius" where 2ya = 10, this results in y = 5.596*10^9, however they have y listed has 1/5.596*10^-9
 // const GAMMA: f64 = 10.0/(2.0 * A);      // satisfy 2*gamma*a = 10
-const GAMMA: f64 = 1.0/(5.596e-9);
+const GAMMA: f64 = 5.596e-9;            // m-1
 const K_B: f64 = 8.617333262e-5;        // Boltzmann constant (eV/K)
 const MATERIAL_LENGTH: f64 = 100e-9;            // 100nm material
 
@@ -28,7 +29,6 @@ impl Lattice {
     fn new(size: usize, temp: f64, field: f64, integrity: f64) -> Self {
         let site_energy= generate_energy_levels(size);
         let site_state = generate_site_states(size, integrity);
-        // let site_state = vec![vec![vec![1; size]; size]; size];
         Lattice { size, site_energy, site_state, temp, field}
     }
 
@@ -44,8 +44,12 @@ impl Lattice {
     // hopping probability (v_ij) for jumping from one site to another
     fn charge_hopping_rate(&self, (x1,y1,z1): (usize,usize,usize), (x2,y2,z2): (usize,usize,usize), target_site_distance: f64, delta_v: f64) -> f64 {
 
+        // println!("site energies target {} origin {}, delta v {}, target dist {}", self.site_energy[x2][y2][z2], self.site_energy[x1][y1][z1], delta_v, target_site_distance);
+
         // find difference in energy between the two sites
         let delta_e = self.site_energy[x2][y2][z2] - self.site_energy[x1][y1][z1] + delta_v;
+
+        // println!("delta_e {}", delta_e);
 
         // let delta_e = -1.0;
         let energy_factor = if delta_e > 0.0 {
@@ -53,7 +57,10 @@ impl Lattice {
         } else {
             1.0
         };
-        
+
+        // println!("energy factor: {}", energy_factor);
+        // println!("gamma {}, V_O {}, target dist {}", GAMMA, V_0, target_site_distance);
+
         V_0 * (-2.0 * GAMMA * target_site_distance).exp() * energy_factor
     }
 
@@ -83,10 +90,9 @@ impl Lattice {
                     let target_site_distance: f64 = A * ((x * x + y * y + z * z) as f64).sqrt();
         
                     // voltage difference between sites
-                    let delta_v = self.field * x as f64;   // volts
+                    let delta_v = self.field * x as f64 * A;   // volts
 
                     let prob = self.charge_hopping_rate((x0.into(),y0.into(),z0.into()), (new_x.into(),new_y.into(),new_z.into()), target_site_distance, delta_v);
-                    // let prob = self.charge_hopping_rate(x0.into(), y0.into(), z0.into(), new_x.into(), new_y.into(), new_z.into());
 
                     site_coord.push((new_x,new_y,new_z));
                     site_prob.push(prob);
@@ -129,6 +135,8 @@ impl Lattice {
         let x_difference_correction = (x_difference + 30.0) % 60.0 - 30.0;
         let x_displacement = x_difference_correction * A;
 
+        // println!("time_elapsed {}, time_inc {}, x_displacement {}", time_elapsed, time_increment, x_displacement);
+
         return (new_site, time_increment, x_displacement)            // return new site, elapsed time, and displacement in the x vector
     }
 
@@ -140,45 +148,47 @@ fn main() {
     let size: u8 = 60;
     let grid_size = 3;
     let voltage = 1.0;                  // default voltage
-    let temperature_var = 295.0;        // default temperature
+    let temperature_var = 298.0;        // default temperature
     let material_integrity = 1.0;       // default integrity (1.0 = 100%)
 
     // temperature Variance
-    // for temperature_var in (275..=315).step_by(5) {
+    // for temperature_var in (285..=315).step_by(5) {
     //     let field = voltage/MATERIAL_LENGTH;        // v/m 
-    //     let lattice = Lattice::new(size as usize, temperature_var as f64, field, 1.0);
+    //     let lattice = Lattice::new(size as usize, temperature_var as f64, field, material_integrity);
 
     //     // random selection algorithm for starting site
     //     let mut rng = rand::thread_rng();
     //     let starting_site: (u8,u8,u8) = (rng.gen_range(0..size), rng.gen_range(0..size), rng.gen_range(0..size));
 
-    //     let log_vector = simulate_hops(lattice,starting_site, grid_size, 1000, 500000.0);
+    //     let log_vector = simulate_hops(lattice,starting_site, grid_size, 1000, 100000.0);
 
     //     //Export the logged data
-    //     export_data(log_vector, temperature_var, voltage)
+    //     export_data(log_vector, temperature_var, voltage, material_integrity)
     // }
 
     // electric field variance
-    // let voltage_step = 0.1;
+    // let voltage_step = 0.5;
     // let mut voltage_var = 0.5;
-    // while voltage_var < 1.6 {
+    // while voltage_var < 3.1 {
     //     let field = voltage_var/MATERIAL_LENGTH;        // v/m 
-    //     let lattice = Lattice::new(size as usize, temperature_var as f64, field, 1.0);
+    //     let lattice = Lattice::new(size as usize, temperature_var as f64, field, material_integrity);
+
+    //     println!("{}", lattice.field);
 
     //     // random selection algorithm for starting site
     //     let mut rng = rand::thread_rng();
     //     let starting_site: (u8,u8,u8) = (rng.gen_range(0..size), rng.gen_range(0..size), rng.gen_range(0..size));
 
-    //     let log_vector = simulate_hops(lattice,starting_site, grid_size, 1000, 500000.0);
+    //     let log_vector = simulate_hops(lattice,starting_site, grid_size, 1000, 100000.0);
 
     //     //Export the logged data
-    //     export_data(log_vector, temperature_var as i32, voltage_var);
+    //     export_data(log_vector, temperature_var as i32, voltage_var, material_integrity);
 
     //     voltage_var += voltage_step;
     // }
 
     //integtriy variance
-    let integrity_decimal = [0.99,0.98,0.95,0.90,0.85,0.80,0.70,0.60,0.50,0.20];
+    let integrity_decimal = [1.0, 1.0, 1.0];
     for material_integrity in integrity_decimal.iter() {
         let field = voltage/MATERIAL_LENGTH;        // v/m 
         let lattice = Lattice::new(size as usize, temperature_var, field, *material_integrity);
@@ -187,7 +197,7 @@ fn main() {
         let mut rng = rand::thread_rng();
         let starting_site: (u8,u8,u8) = (rng.gen_range(0..size), rng.gen_range(0..size), rng.gen_range(0..size));
 
-        let log_vector = simulate_hops(lattice,starting_site, grid_size, 1000, 500000.0);
+        let log_vector = simulate_hops(lattice,starting_site, grid_size, 1000, 100000.0);
 
         //Export the logged data
         export_data(log_vector, temperature_var as i32, voltage, *material_integrity)
@@ -247,7 +257,7 @@ fn simulate_hops(lattice: Lattice, random_site: (u8, u8, u8), grid_size: i8, sna
 // MARK: Gen. energy levels
 // Generates Guassian/Normal Distribution of starting energy levels for each site
 fn generate_energy_levels(size: usize) -> Vec<Vec<Vec<f64>>> {
-    let std_dev: f64 = 162e-3; // eV
+    let std_dev: f64 = 25.68e-3; // eV
     let mean: f64 = 0.0;    //conduction band level for material
     let normal_dist = Normal::new(mean, std_dev).unwrap();
     let mut rng = rand::thread_rng();
@@ -339,5 +349,5 @@ fn export_data(log_vector: Vec<(f64, f64)>, temp: i32, voltage: f64, integrity: 
     }
 
     wtr.flush().expect("Unable to flush CSV writer");
-    println!("export successful to: log_data.csv");
+    println!("export successful to: {}", file_name);
 }
