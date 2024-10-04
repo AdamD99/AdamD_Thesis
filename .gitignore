@@ -3,3 +3,4 @@ target/
 main_old.rs
 data/
 old data/
+tests/

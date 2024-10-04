@@ -2,18 +2,19 @@ extern crate rand;
 extern crate csv;
 
 use rand::Rng;
+use rand_distr::num_traits::int;
 use rand_distr::{Normal, Distribution};
-use core::time;
 use std::fs;
 use csv::Writer;
 use chrono::Local;
+use std::time::Duration;
+use std::thread;
 
 const A: f64 = 0.8935e-9;                  // distance between sites (m)
 const V_0: f64 = 1.0e12;                  // base hopping attemp rate (eV)
 
-//**!? in papers stated as the "inverse localization radius" where 2ya = 10, this results in y = 5.596*10^9, however they have y listed has 1/5.596*10^-9
-// const GAMMA: f64 = 10.0/(2.0 * A);      // satisfy 2*gamma*a = 10
-const GAMMA: f64 = 5.596e-9;            // m-1
+// satisfy 2*gamma*a = 10
+const GAMMA: f64 = 5.596e9;            // m-1
 const K_B: f64 = 8.617333262e-5;        // Boltzmann constant (eV/K)
 const MATERIAL_LENGTH: f64 = 100e-9;            // 100nm material
 
@@ -50,8 +51,6 @@ impl Lattice {
         // find difference in energy between the two sites
         let delta_e = self.site_energy[x2][y2][z2] - self.site_energy[x1][y1][z1] + delta_v;
 
-        // println!("delta_e {}", delta_e);
-
         // let delta_e = -1.0;
         let energy_factor = if delta_e > 0.0 {
             f64::exp((-delta_e)/(K_B*self.temp))
@@ -60,12 +59,12 @@ impl Lattice {
         };
 
         // println!("energy factor: {}", energy_factor);
-        // println!("gamma {}, V_O {}, target dist {}", GAMMA, V_0, target_site_distance);
+        // println!("exp {}", (-2.0 * GAMMA * target_site_distance).exp());
 
         V_0 * (-2.0 * GAMMA * target_site_distance).exp() * energy_factor
     }
 
-    // MARK: Simulate Hop
+    // MARK: Simulate Hop (Calc.)
     // calculate hopping probabilites for all possible sites
     fn simulate_hop(&self, current_site: (u8, u8, u8), grid_size: i8) -> ((u8, u8, u8), f64, f64) {
         let (x0, y0, z0) = current_site;
@@ -112,18 +111,25 @@ impl Lattice {
         
         //random event selection
         let mut event_selector = rand::thread_rng();                                 // declare random number generator
-        let random_site_index: f64 = event_selector.gen_range(0.0..=1.0) + f64::EPSILON;        // randomise an index of event to execute
+        let random_site_index: f64 = event_selector.gen_range(0.0..=1.0);        // randomise an index of event to execute
 
         //execute hopping event for randomly selected site
-        let mut current_probability_total = event_probabilities[0]; // initialise total to first entry in event probs
+        let mut current_probability_total = 0.0; // initialise total to first entry in event probs
         let mut i = 0;
 
         while current_probability_total < random_site_index  && i < event_probabilities.len() {
-            i += 1;
             current_probability_total += event_probabilities[i];
+            i += 1;
         }
 
-        let new_site = site_coord[i];
+        let new_site: (u8,u8,u8);
+        if i == 0 {
+            new_site = site_coord[0]; // If `i` is 0, the first event is selected
+        } else {
+            new_site = site_coord[i - 1]; // Otherwise, increment the appropriate event
+        }
+
+        // let new_site = site_coord[i-1];
         
         let random_time_index: f64 = event_selector.gen_range(0.0..=1.0) + f64::EPSILON; 
         let time_elapsed = -random_time_index.ln() / vtot;  // seconds
@@ -132,10 +138,14 @@ impl Lattice {
         let t_0: f64 = 1.0/(6.0 * V_0 * (-2.0 * GAMMA * A).exp());
 
         let time_increment = time_elapsed/t_0;                // normalised to periods of t_0
-        // println!("new site: {:?}, new sitex: {}, x0: {}, A: {}", new_site, new_site.0, x0, A);
-        let x_difference = new_site.0 as f64 - x0 as f64;
-        let x_difference_correction = (x_difference + 30.0) % 60.0 - 30.0;
+        // println!("new site: {:?}, current site: {:?}, new sitex: {}, x0: {}, A: {}", new_site, current_site, new_site.0, x0, A);
+        let x_difference = new_site.0 as f64 - current_site.0 as f64;
+        let x_difference_correction = (x_difference + 30.0).rem_euclid(60.0) - 30.0;
         let x_displacement = x_difference_correction * A;
+
+        if x_displacement > (3.0 * A) || x_displacement < (-3.0 * A) {
+            println!("!! UNAUTHORISED HOP DETECTED !! Hop displacement (X): {}", x_displacement)
+        }
 
         // println!("time_elapsed {}, time_inc {}, x_displacement {}", time_elapsed, time_increment, x_displacement);
 
@@ -152,21 +162,7 @@ fn main() {
     let voltage = 7.0;                  // default voltage
     let temperature_var = 298.0;        // default temperature
     let material_integrity = 1.0;       // default integrity (1.0 = 100%)
-
-    // temperature Variance
-    // for temperature_var in (285..=315).step_by(5) {
-    //     let field = voltage/MATERIAL_LENGTH;        // v/m 
-    //     let lattice = Lattice::new(size as usize, temperature_var as f64, field, material_integrity);
-
-    //     // random selection algorithm for starting site
-    //     let mut rng = rand::thread_rng();
-    //     let starting_site: (u8,u8,u8) = (rng.gen_range(0..size), rng.gen_range(0..size), rng.gen_range(0..size));
-
-    //     let log_vector = simulate_hops(lattice,starting_site, grid_size, 1000, 100000.0);
-
-    //     //Export the logged data
-    //     export_data(log_vector, temperature_var, voltage, material_integrity)
-    // }
+    let electron_count = 150;
 
     // electric field variance
     // let voltage_step = 0.5;
@@ -191,19 +187,25 @@ fn main() {
 
     //integtriy variance
     // let integrity_decimal = [1.0, 1.0, 1.0, 0.75, 0.75, 0.75, 0.5, 0.5, 0.5, 0.25, 0.25, 0.25, 0.15, 0.15, 0.15, 0.1, 0.1, 0.1, 0.05, 0.05];
-    let integrity_decimal = [1.0, 1.0, 1.0, 1.0, 1.0];
+    let integrity_decimal = [1.0];
     for material_integrity in integrity_decimal.iter() {
-        let field = voltage/MATERIAL_LENGTH;        // v/m 
-        let lattice = Lattice::new(size as usize, temperature_var, field, *material_integrity);
+        let mut simulated_electrons = 0;
+        let field = voltage/MATERIAL_LENGTH;        // v/m
 
-        // random selection algorithm for starting site
-        let mut rng = rand::thread_rng();
-        let starting_site: (u8,u8,u8) = (rng.gen_range(0..size), rng.gen_range(0..size), rng.gen_range(0..size));
+        while simulated_electrons < electron_count {
+            simulated_electrons += 1;
+            let lattice = Lattice::new(size as usize, temperature_var, field, *material_integrity);
 
-        let log_vector = simulate_hops(lattice,starting_site, grid_size, 1000, 500000.0);
+            // random selection algorithm for starting site
+            let mut rng = rand::thread_rng();
+            let starting_site: (u8,u8,u8) = (rng.gen_range(0..size), rng.gen_range(0..size), rng.gen_range(0..size));
 
-        //Export the logged data
-        export_data(log_vector, temperature_var as i32, voltage, *material_integrity)
+            // let log_vector = simulate_hops(lattice,starting_site, grid_size, 100, 50000000.0);
+            let log_vector = simulate_hops(lattice,starting_site, grid_size, 1000, 10000000.0);
+
+            //Export the logged data
+            export_data(log_vector, temperature_var as i32, voltage, *material_integrity, simulated_electrons)
+        }
     }
 
     
@@ -211,19 +213,21 @@ fn main() {
     println!("Simulation Complete!")
 }
 
-
+// MARK: Simulate Hops (Loop)
 fn simulate_hops(lattice: Lattice, random_site: (u8, u8, u8), grid_size: i8, snapshot_freq: usize, runtime: f64) -> Vec<(f64, f64, f64)> {
     // Declare the lattice
     let mut t0_elapsed_total = 0.0;
     let mut x_displacement_total = 0.0;
     let mut total_energy = 0.0;
     let mut log_vector: Vec<(f64, f64, f64)> = Vec::new(); // Vector to store time and displacement
+    // let mut coord_vector: Vec<(u8,u8,u8)> = Vec::new();
     let mut iteration_counter = 0;
 
     // For reporting simulation speed
     let mut timer = std::time::Instant::now();
     let mut percent_complete_reported = 5.0;
     let mut iterations_at_last_report = 0;
+    let mut var_snapshot_freq: usize;
 
     let (mut x0, mut y0, mut z0) = random_site;
 
@@ -231,18 +235,36 @@ fn simulate_hops(lattice: Lattice, random_site: (u8, u8, u8), grid_size: i8, sna
         // println!("MAIN: Simulating Hop: {:?}", (x0,y0,z0));
         let (new_site, t0_elapsed_inc, x_displacement_inc) = lattice.simulate_hop((x0,y0,z0), grid_size);
 
+        //define a smaller snapshot frequency for earlier values
+
         // accumulativ energy
-        total_energy += lattice.site_energy[x0 as usize][y0 as usize][z0 as usize];
+        total_energy += lattice.site_energy[x0 as usize][y0 as usize][z0 as usize] * t0_elapsed_inc;
 
         (x0, y0, z0) = new_site;
+
+        // coord_vector.push((x0,y0,z0));
         t0_elapsed_total += t0_elapsed_inc;
         x_displacement_total += x_displacement_inc;
 
         iteration_counter += 1;
 
+        let runtime_percent = t0_elapsed_total/runtime * 100.0;
+
+        if runtime_percent < 1.0 {
+            var_snapshot_freq = 1;
+        } else if runtime_percent < 5.0 {
+            var_snapshot_freq = 5;
+        } else if runtime_percent < 10.0 {
+            var_snapshot_freq = 10;
+        } else {
+            var_snapshot_freq = snapshot_freq;
+        }
         // Store every Nth snapshot in the vector
-        if iteration_counter % snapshot_freq == 0 {
-            let mean_energy = total_energy / (iteration_counter as f64);
+        if iteration_counter % var_snapshot_freq == 0 || runtime_percent >= 100.0 {
+            if t0_elapsed_total > runtime {
+                t0_elapsed_total = runtime;
+            }
+            let mean_energy = total_energy / t0_elapsed_total;
             log_vector.push((t0_elapsed_total, x_displacement_total, mean_energy));
 
             let percent_complete = (t0_elapsed_total/runtime)*100.0;
@@ -267,7 +289,11 @@ fn simulate_hops(lattice: Lattice, random_site: (u8, u8, u8), grid_size: i8, sna
 // MARK: Gen. energy levels
 // Generates Guassian/Normal Distribution of starting energy levels for each site
 fn generate_energy_levels(size: usize) -> Vec<Vec<Vec<f64>>> {
-    let std_dev: f64 = 162e-3; // eV
+    // let std_dev: f64 = 25.67965e-3; // eV dos=1
+    // let std_dev: f64 = 51.35931e-3; // eV dos=2
+    // let std_dev: f64 = 77.03896e-3; // eV dos=3
+    let std_dev: f64 = 100e-3;
+
     let mean: f64 = 0.0;    //conduction band level for material
     let normal_dist = Normal::new(mean, std_dev).unwrap();
     let mut rng = rand::thread_rng();
@@ -281,6 +307,8 @@ fn generate_energy_levels(size: usize) -> Vec<Vec<Vec<f64>>> {
             }
         }
     }
+
+    // export_energy_levels(site_energy.clone());
 
     site_energy
 }
@@ -317,6 +345,8 @@ fn generate_site_states(size: usize, integrity: f64) -> Vec<Vec<Vec<u8>>> {
         }
     }
 
+    // export_site_states(site_states.clone(), integrity);
+
     site_states
 }
 
@@ -339,18 +369,87 @@ fn generate_site_states(size: usize, integrity: f64) -> Vec<Vec<Vec<u8>>> {
 //     site_distance_index
 // }
 
+fn export_energy_levels(energy_vector: Vec<Vec<Vec<f64>>>) {
+    println!("EXPORTING NEW LATTICE ENERGY LEVELS");
+
+    let date = Local::now();
+    let formatted_date = date.format("%d-%m-%Y-%H;%M;%S").to_string();
+    let file_name = format!("data/log_data-SITE_ENERGY-{}.csv", formatted_date);
+
+    let file = fs::File::create(&file_name).expect("Unable to create file");
+    let mut wtr = Writer::from_writer(file);
+
+    // for matrix in energy_vector.iter() {
+    //     for row in matrix.iter() {
+    //         let row_as_strings: Vec<String> = row.iter().map(|val| val.to_string()).collect();
+    //         wtr.write_record(&row_as_strings);
+    //     }
+    // }
+
+    // Loop through the 3D site vector and write the coordinates and state
+    for (x, matrix) in energy_vector.iter().enumerate() {
+        for (y, row) in matrix.iter().enumerate() {
+            for (z, &site_state) in row.iter().enumerate() {
+                // Write x, y, z, and site state to the file
+                wtr.write_record(&[x.to_string(), y.to_string(), z.to_string(), site_state.to_string()])
+                    .expect("Unable to write record");
+            }
+        }
+    }
+
+    // Ensure all records are written to the file
+    wtr.flush();
+    println!("Data successfully written to: {}", file_name);
+    thread::sleep(Duration::from_secs(2));
+
+}
+
+fn export_site_states(site_vector: Vec<Vec<Vec<u8>>>, integrity: f64) {
+    println!("EXPORTING NEW LATTICE SITE STATES");
+
+    let date = Local::now();
+    let formatted_date = date.format("%d-%m-%Y-%H;%M;%S").to_string();
+    let file_name = format!("data/SITE_STATE-Integrity{}-{}.csv", integrity*100.0, formatted_date);
+
+    let file = fs::File::create(&file_name).expect("Unable to create file");
+    let mut wtr = Writer::from_writer(file);
+
+    wtr.write_record(&["x", "y", "z", "value"]).expect("Unable to write header");
+
+    // Loop through the 3D site vector and write the coordinates and state
+    for (x, matrix) in site_vector.iter().enumerate() {
+        for (y, row) in matrix.iter().enumerate() {
+            for (z, &site_state) in row.iter().enumerate() {
+                // Write x, y, z, and site state to the file
+                wtr.write_record(&[x.to_string(), y.to_string(), z.to_string(), site_state.to_string()])
+                    .expect("Unable to write record");
+            }
+        }
+    }
+
+    // Ensure all records are written to the file
+    wtr.flush();
+    println!("Data successfully written to: {}", file_name);
+    thread::sleep(Duration::from_secs(2));
+
+}
+
 // Write Lattice data to a CSV file
-fn export_data(log_vector: Vec<(f64, f64, f64)>, temp: i32, voltage: f64, integrity: f64) {
+fn export_data(log_vector: Vec<(f64, f64, f64)>, temp: i32, voltage: f64, integrity: f64, carrier_count: u8) {
     // create data subfolder
     fs::create_dir_all("data").expect("Unable to create directory or directory already exists");
 
     let date = Local::now();
     let formatted_date = date.format("%d-%m-%Y-%H;%M;%S").to_string();
-    let file_name = format!("data/log_data-Temp;{}_Voltage;{:.1}V_Integrity;{}%-{}.csv", temp as i32, voltage, (integrity*100.0) as i8, formatted_date);
+    let file_name = format!("data/Data-Carrier;{}-Temp;{}_Voltage;{:.1}V_Integrity;{}%-{}.csv", carrier_count, temp as i32, voltage, (integrity*100.0) as i8, formatted_date);
+    // let coords_name = format!("data/log_data-COORDS-{}.csv", formatted_date);
 
     //write data to csv
     let file = fs::File::create(&file_name).expect("Unable to create file");
     let mut wtr = Writer::from_writer(file);
+
+    // let file_coords = fs::File::create(&coords_name).expect("Unable to create file");
+    // let mut wtr_coords = Writer::from_writer(file_coords);
     
     // Write headers
     // wtr.write_record(&["Time", "Distance"]).expect("Unable to write record");
@@ -358,6 +457,10 @@ fn export_data(log_vector: Vec<(f64, f64, f64)>, temp: i32, voltage: f64, integr
     for (time, distance, energy) in log_vector.iter() {
         wtr.write_record(&[time.to_string(), distance.to_string(), energy.to_string()]).expect("Unable to write record");
     }
+
+    // for (x, y, z) in coord_vector.iter() {
+    //     wtr_coords.write_record(&[x.to_string(), y.to_string(), z.to_string()]).expect("Unable to write record");
+    // }
 
     wtr.flush().expect("Unable to flush CSV writer");
     println!("export successful to: {}", file_name);
